@@ -1,20 +1,31 @@
 import { PolicyRecord, DashboardStats, SecurityAuditLog, ExtractionResult } from '../types';
 import { initialPolicies } from '../data/initialPolicies';
-import { 
-  fetchFirestorePolicies, 
-  saveFirestorePolicy, 
-  updateFirestorePolicy, 
+import {
+  fetchFirestorePolicies,
+  saveFirestorePolicy,
+  updateFirestorePolicy,
   deleteFirestorePolicy,
   updateFirestoreProfile
 } from './firebase';
 
-export { 
-  fetchFirestorePolicies, 
-  saveFirestorePolicy, 
-  updateFirestorePolicy, 
+export {
+  fetchFirestorePolicies,
+  saveFirestorePolicy,
+  updateFirestorePolicy,
   deleteFirestorePolicy,
   updateFirestoreProfile
 };
+
+// The React app is hosted separately from the Express/AI API in production.
+// Vite exposes only VITE_* variables to browser code, so this value is safe to expose.
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? 'http://localhost:3000' : 'https://v-shiroya-api.onrender.com')
+).replace(/\/$/, '');
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
 const STORAGE_KEY = 'policyai_stored_policies';
 
@@ -28,7 +39,6 @@ export function getLocalPolicies(): PolicyRecord[] {
   } catch (e) {
     console.error('Error reading localStorage policies:', e);
   }
-  // Initialize with initial sample policies
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initialPolicies));
   return initialPolicies;
 }
@@ -54,14 +64,12 @@ export function saveLocalPolicies(policies: PolicyRecord[]) {
 export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'): Promise<PolicyRecord[]> {
   let list: PolicyRecord[] = [];
 
-  // 1. Try fetching from Firebase Firestore Database
   try {
     const firestorePols = await fetchFirestorePolicies();
     if (firestorePols && firestorePols.length > 0) {
       list = firestorePols;
       saveLocalPolicies(list);
     } else {
-      // Seed initial sample policies to Firestore if collection is empty
       const initial = getLocalPolicies();
       for (const pol of initial) {
         await saveFirestorePolicy(pol).catch(() => {});
@@ -71,7 +79,7 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
   } catch (err) {
     console.warn('Firestore fetch failed, checking Express API & local cache:', err);
     try {
-      const url = new URL('/api/policies', window.location.origin);
+      const url = new URL(apiUrl('/api/policies'));
       if (query) url.searchParams.set('q', query);
       if (status !== 'ALL') url.searchParams.set('status', status);
       if (provider !== 'ALL') url.searchParams.set('provider', provider);
@@ -93,7 +101,6 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
     list = getLocalPolicies();
   }
 
-  // Filter in memory for search & filter parameters
   if (query) {
     const q = query.toLowerCase();
     list = list.filter(p =>
@@ -122,7 +129,7 @@ export async function analyzePolicyDocument(
   instruction: string
 ): Promise<ExtractionResult> {
   try {
-    const response = await fetch('/api/analyze-policy', {
+    const response = await fetch(apiUrl('/api/analyze-policy'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileData, fileName, mimeType, instruction }),
@@ -152,7 +159,7 @@ export async function checkDuplicatePolicy(
   phoneNumber: string
 ): Promise<{ isDuplicate: boolean; existingPolicy: PolicyRecord | null }> {
   try {
-    const res = await fetch('/api/policies/check-duplicate', {
+    const res = await fetch(apiUrl('/api/policies/check-duplicate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ policyNumber, ownerName, phoneNumber }),
@@ -164,7 +171,6 @@ export async function checkDuplicatePolicy(
     console.warn('Duplicate check API offline, performing client check', err);
   }
 
-  // Fallback local duplicate check
   const list = getLocalPolicies();
   const dup = list.find(p =>
     (policyNumber && p.policyNumber.toLowerCase().trim() === policyNumber.toLowerCase().trim()) ||
@@ -215,12 +221,10 @@ export async function savePolicyRecord(policy: Partial<PolicyRecord>): Promise<P
     fieldConfidenceMap: policy.fieldConfidenceMap || {}
   };
 
-  // 1. Save directly to Firebase Firestore Database
   await saveFirestorePolicy(newRecord);
 
-  // 2. Cache to Express server & localStorage
   try {
-    await fetch('/api/policies', {
+    await fetch(apiUrl('/api/policies'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newRecord),
@@ -246,16 +250,14 @@ export async function updatePolicyRecord(id: string, updates: Partial<PolicyReco
   const idx = list.findIndex(p => p.id === id);
   const updatedRecord = idx !== -1 ? { ...list[idx], ...updates, updatedAt: new Date().toISOString() } : (updates as PolicyRecord);
 
-  // 1. Update in Firestore
   try {
     await updateFirestorePolicy(id, updates);
   } catch (fsErr) {
     console.warn('Firestore update warning:', fsErr);
   }
 
-  // 2. Update Express backend
   try {
-    await fetch(`/api/policies/${id}`, {
+    await fetch(apiUrl(`/api/policies/${id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates),
@@ -273,16 +275,14 @@ export async function updatePolicyRecord(id: string, updates: Partial<PolicyReco
 }
 
 export async function deletePolicyRecord(id: string): Promise<boolean> {
-  // 1. Delete from Firestore
   try {
     await deleteFirestorePolicy(id);
   } catch (fsErr) {
     console.warn('Firestore delete warning:', fsErr);
   }
 
-  // 2. Delete from Express backend
   try {
-    await fetch(`/api/policies/${id}`, { method: 'DELETE' }).catch(() => {});
+    await fetch(apiUrl(`/api/policies/${id}`), { method: 'DELETE' }).catch(() => {});
   } catch (err) {
     // Fallthrough
   }
@@ -296,7 +296,7 @@ export async function deletePolicyRecord(id: string): Promise<boolean> {
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   try {
-    const res = await fetch('/api/stats');
+    const res = await fetch(apiUrl('/api/stats'));
     if (res.ok) {
       return await res.json();
     }
@@ -344,12 +344,12 @@ export interface NotificationAlertResult {
 }
 
 export async function dispatch30DayExpiryAlerts(
-  policyIds?: string[], 
+  policyIds?: string[],
   channel: 'EMAIL' | 'WHATSAPP' | 'SMS' = 'EMAIL',
   customMessage?: string
 ): Promise<NotificationAlertResult> {
   try {
-    const res = await fetch('/api/notifications/send-alert', {
+    const res = await fetch(apiUrl('/api/notifications/send-alert'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ policyIds, channel, customMessage })
@@ -361,7 +361,6 @@ export async function dispatch30DayExpiryAlerts(
     console.warn('Notification API call failed, generating simulated alert dispatch', err);
   }
 
-  // Client-side fallback dispatch
   const policies = getLocalPolicies();
   const today = new Date();
   const targetPolicies = policies.filter(p => {
@@ -399,7 +398,7 @@ export async function dispatch30DayExpiryAlerts(
 
 export async function fetchSecurityAuditLogs(): Promise<SecurityAuditLog[]> {
   try {
-    const res = await fetch('/api/security/audit');
+    const res = await fetch(apiUrl('/api/security/audit'));
     if (res.ok) {
       const data = await res.json();
       return data.logs;
