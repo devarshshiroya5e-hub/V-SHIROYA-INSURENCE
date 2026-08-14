@@ -14,17 +14,22 @@ export interface AdditionalDetail {
   confidence?: ConfidenceLevel;
 }
 
+export interface FieldEvidence {
+  field: string;
+  sourceText: string;
+}
+
 export interface PolicyRecord {
   id: string;
   ownerName: string;
   policyNumber: string;
   providerCompany: string;
-  policyType: string; // e.g., Term Life, Health Insurance, Motor, ULIP, Endowment
-  category?: string; // Auto-categorized tag: Life, Health, Vehicle, Fire, Travel, General
+  policyType: string;
+  category?: string;
   startDate: string | null;
   endDate: string | null;
   premiumAmount: number | null;
-  premiumFrequency: string | null; // e.g., Annual, Monthly, Semi-Annual, Quarterly, One-time
+  premiumFrequency: string | null;
   sumAssured: number | null;
   insuredPerson: string | null;
   nominee: string | null;
@@ -33,10 +38,12 @@ export interface PolicyRecord {
   email: string | null;
   address: string | null;
   dateOfBirth: string | null;
+  age: number | null;
+  ageSource?: string | null;
   agentName: string | null;
   agentPhone: string | null;
   branchName?: string | null;
-  paymentMode: string | null; // e.g., NetBanking, Auto-Debit, Cheque, UPI
+  paymentMode: string | null;
   policyStatus: PolicyStatus;
   maturityDate: string | null;
   documentUrl: string | null;
@@ -44,7 +51,7 @@ export interface PolicyRecord {
   fileSizeBytes?: number;
   fileType?: string;
   extractedText: string;
-  aiConfidence: number; // 0 to 100
+  aiConfidence: number;
   createdAt: string;
   updatedAt: string;
   userId: string;
@@ -52,6 +59,7 @@ export interface PolicyRecord {
   missingFields: string[];
   uncertainFields: string[];
   fieldConfidenceMap?: Record<string, ConfidenceLevel>;
+  fieldEvidence?: FieldEvidence[];
   documentType?: string;
   detectedInsurer?: string;
   appliedTemplate?: string;
@@ -75,6 +83,8 @@ export interface ExtractionResult {
   email: string | null;
   address: string | null;
   dateOfBirth: string | null;
+  age: number | null;
+  ageSource?: string | null;
   agentName: string | null;
   agentPhone: string | null;
   branchName?: string | null;
@@ -87,6 +97,7 @@ export interface ExtractionResult {
   confidence: number;
   extractedText: string;
   fieldConfidenceMap: Record<string, ConfidenceLevel>;
+  fieldEvidence?: FieldEvidence[];
   documentType?: string;
   detectedInsurer?: string;
   appliedTemplate?: string;
