@@ -29,6 +29,13 @@ backend.on('exit', (code, signal) => {
   }
 });
 
+function setCorsHeaders(res: http.ServerResponse) {
+  res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+}
+
 function addCorsHeaders(headers: http.OutgoingHttpHeaders) {
   headers['access-control-allow-origin'] = process.env.FRONTEND_URL || '*';
   headers['access-control-allow-methods'] = 'GET,POST,PUT,PATCH,DELETE,OPTIONS';
@@ -37,7 +44,7 @@ function addCorsHeaders(headers: http.OutgoingHttpHeaders) {
 }
 
 const proxy = http.createServer((req, res) => {
-  addCorsHeaders(res.getHeaders());
+  setCorsHeaders(res);
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
@@ -67,7 +74,10 @@ const proxy = http.createServer((req, res) => {
   proxyReq.on('error', (error) => {
     console.error('API proxy error:', error.message);
     if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.writeHead(502, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': process.env.FRONTEND_URL || '*',
+      });
     }
     res.end(JSON.stringify({ error: 'API backend is unavailable.' }));
   });
