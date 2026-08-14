@@ -16,8 +16,6 @@ export {
   updateFirestoreProfile
 };
 
-// The React app is hosted separately from the Express/AI API in production.
-// Vite exposes only VITE_* variables to browser code, so this value is safe to expose.
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ||
   (import.meta.env.DEV ? 'http://localhost:3000' : 'https://v-shiroya-api.onrender.com')
@@ -29,13 +27,10 @@ function apiUrl(path: string): string {
 
 const STORAGE_KEY = 'policyai_stored_policies';
 
-// Helper to get local fallback policies
 export function getLocalPolicies(): PolicyRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
+    if (raw) return JSON.parse(raw);
   } catch (e) {
     console.error('Error reading localStorage policies:', e);
   }
@@ -60,10 +55,8 @@ export function saveLocalPolicies(policies: PolicyRecord[]) {
   }
 }
 
-// Client API Methods integrated with Firebase Firestore
 export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'): Promise<PolicyRecord[]> {
   let list: PolicyRecord[] = [];
-
   try {
     const firestorePols = await fetchFirestorePolicies();
     if (firestorePols && firestorePols.length > 0) {
@@ -71,9 +64,7 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
       saveLocalPolicies(list);
     } else {
       const initial = getLocalPolicies();
-      for (const pol of initial) {
-        await saveFirestorePolicy(pol).catch(() => {});
-      }
+      for (const pol of initial) await saveFirestorePolicy(pol).catch(() => {});
       list = initial;
     }
   } catch (err) {
@@ -83,7 +74,6 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
       if (query) url.searchParams.set('q', query);
       if (status !== 'ALL') url.searchParams.set('status', status);
       if (provider !== 'ALL') url.searchParams.set('provider', provider);
-
       const res = await fetch(url.toString());
       if (res.ok) {
         const data = await res.json();
@@ -97,10 +87,7 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
     }
   }
 
-  if (!list || list.length === 0) {
-    list = getLocalPolicies();
-  }
-
+  if (!list || list.length === 0) list = getLocalPolicies();
   if (query) {
     const q = query.toLowerCase();
     list = list.filter(p =>
@@ -112,13 +99,8 @@ export async function fetchPolicies(query = '', status = 'ALL', provider = 'ALL'
       (p.category && p.category.toLowerCase().includes(q))
     );
   }
-  if (status !== 'ALL') {
-    list = list.filter(p => p.policyStatus === status);
-  }
-  if (provider !== 'ALL') {
-    list = list.filter(p => p.providerCompany === provider);
-  }
-
+  if (status !== 'ALL') list = list.filter(p => p.policyStatus === status);
+  if (provider !== 'ALL') list = list.filter(p => p.providerCompany === provider);
   return list;
 }
 
@@ -134,18 +116,12 @@ export async function analyzePolicyDocument(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileData, fileName, mimeType, instruction }),
     });
-
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
-      throw new Error(
-        errData.error || errData.details || `AI Policy Analysis failed (Server HTTP ${response.status})`
-      );
+      throw new Error(errData.error || errData.details || `AI Policy Analysis failed (Server HTTP ${response.status})`);
     }
-
     const data = await response.json();
-    if (!data.extraction) {
-      throw new Error('AI analysis server returned an invalid response structure.');
-    }
+    if (!data.extraction) throw new Error('AI analysis server returned an invalid response structure.');
     return data.extraction;
   } catch (err: any) {
     console.error('Error in analyzePolicyDocument:', err);
@@ -164,19 +140,15 @@ export async function checkDuplicatePolicy(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ policyNumber, ownerName, phoneNumber }),
     });
-    if (res.ok) {
-      return await res.json();
-    }
+    if (res.ok) return await res.json();
   } catch (err) {
     console.warn('Duplicate check API offline, performing client check', err);
   }
-
   const list = getLocalPolicies();
   const dup = list.find(p =>
     (policyNumber && p.policyNumber.toLowerCase().trim() === policyNumber.toLowerCase().trim()) ||
     (ownerName && phoneNumber && p.ownerName.toLowerCase().trim() === ownerName.toLowerCase().trim() && p.phoneNumber === phoneNumber)
   );
-
   return { isDuplicate: !!dup, existingPolicy: dup || null };
 }
 
@@ -200,6 +172,8 @@ export async function savePolicyRecord(policy: Partial<PolicyRecord>): Promise<P
     email: policy.email || null,
     address: policy.address || null,
     dateOfBirth: policy.dateOfBirth || null,
+    age: policy.age ?? null,
+    ageSource: policy.ageSource || null,
     agentName: policy.agentName || null,
     agentPhone: policy.agentPhone || null,
     branchName: policy.branchName || null,
@@ -218,30 +192,27 @@ export async function savePolicyRecord(policy: Partial<PolicyRecord>): Promise<P
     additionalDetails: policy.additionalDetails || [],
     missingFields: policy.missingFields || [],
     uncertainFields: policy.uncertainFields || [],
-    fieldConfidenceMap: policy.fieldConfidenceMap || {}
+    fieldConfidenceMap: policy.fieldConfidenceMap || {},
+    fieldEvidence: policy.fieldEvidence || [],
+    documentType: policy.documentType,
+    detectedInsurer: policy.detectedInsurer,
+    appliedTemplate: policy.appliedTemplate
   };
 
   await saveFirestorePolicy(newRecord);
-
   try {
     await fetch(apiUrl('/api/policies'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newRecord),
     }).catch(() => {});
-  } catch (err) {
-    // Fallthrough
-  }
+  } catch (err) {}
 
   const list = getLocalPolicies();
   const existingIdx = list.findIndex(p => p.id === newRecord.id);
-  if (existingIdx !== -1) {
-    list[existingIdx] = newRecord;
-  } else {
-    list.unshift(newRecord);
-  }
+  if (existingIdx !== -1) list[existingIdx] = newRecord;
+  else list.unshift(newRecord);
   saveLocalPolicies(list);
-
   return newRecord;
 }
 
@@ -249,77 +220,37 @@ export async function updatePolicyRecord(id: string, updates: Partial<PolicyReco
   const list = getLocalPolicies();
   const idx = list.findIndex(p => p.id === id);
   const updatedRecord = idx !== -1 ? { ...list[idx], ...updates, updatedAt: new Date().toISOString() } : (updates as PolicyRecord);
-
-  try {
-    await updateFirestorePolicy(id, updates);
-  } catch (fsErr) {
-    console.warn('Firestore update warning:', fsErr);
-  }
-
+  try { await updateFirestorePolicy(id, updates); } catch (fsErr) { console.warn('Firestore update warning:', fsErr); }
   try {
     await fetch(apiUrl(`/api/policies/${id}`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates)
     }).catch(() => {});
-  } catch (err) {
-    // Fallthrough
-  }
-
-  if (idx !== -1) {
-    list[idx] = updatedRecord;
-    saveLocalPolicies(list);
-  }
-
+  } catch (err) {}
+  if (idx !== -1) { list[idx] = updatedRecord; saveLocalPolicies(list); }
   return updatedRecord;
 }
 
 export async function deletePolicyRecord(id: string): Promise<boolean> {
-  try {
-    await deleteFirestorePolicy(id);
-  } catch (fsErr) {
-    console.warn('Firestore delete warning:', fsErr);
-  }
-
-  try {
-    await fetch(apiUrl(`/api/policies/${id}`), { method: 'DELETE' }).catch(() => {});
-  } catch (err) {
-    // Fallthrough
-  }
-
-  const list = getLocalPolicies();
-  const filtered = list.filter(p => p.id !== id);
-  saveLocalPolicies(filtered);
-
+  try { await deleteFirestorePolicy(id); } catch (fsErr) { console.warn('Firestore delete warning:', fsErr); }
+  try { await fetch(apiUrl(`/api/policies/${id}`), { method: 'DELETE' }).catch(() => {}); } catch (err) {}
+  saveLocalPolicies(getLocalPolicies().filter(p => p.id !== id));
   return true;
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   try {
     const res = await fetch(apiUrl('/api/stats'));
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (err) {
-    console.warn('Stats API failed, computing locally', err);
-  }
-
+    if (res.ok) return await res.json();
+  } catch (err) { console.warn('Stats API failed, computing locally', err); }
   const policies = getLocalPolicies();
-  const totalPolicies = policies.length;
-  const activePolicies = policies.filter(p => p.policyStatus === 'ACTIVE').length;
-  const expiredPolicies = policies.filter(p => p.policyStatus === 'EXPIRED').length;
-  const expiringSoonPolicies = policies.filter(p => p.policyStatus === 'EXPIRING SOON').length;
-  const totalPremiumValue = policies.reduce((sum, p) => sum + (Number(p.premiumAmount) || 0), 0);
   const currentMonthStr = new Date().toISOString().slice(0, 7);
-  const policiesAddedThisMonth = policies.filter(p => p.createdAt && p.createdAt.startsWith(currentMonthStr)).length;
-
   return {
-    totalPolicies,
-    activePolicies,
-    expiredPolicies,
-    expiringSoonPolicies,
-    totalPremiumValue,
-    policiesAddedThisMonth
+    totalPolicies: policies.length,
+    activePolicies: policies.filter(p => p.policyStatus === 'ACTIVE').length,
+    expiredPolicies: policies.filter(p => p.policyStatus === 'EXPIRED').length,
+    expiringSoonPolicies: policies.filter(p => p.policyStatus === 'EXPIRING SOON').length,
+    totalPremiumValue: policies.reduce((sum, p) => sum + (Number(p.premiumAmount) || 0), 0),
+    policiesAddedThisMonth: policies.filter(p => p.createdAt && p.createdAt.startsWith(currentMonthStr)).length
   };
 }
 
@@ -327,39 +258,16 @@ export interface NotificationAlertResult {
   success: boolean;
   message: string;
   countSent: number;
-  alerts: Array<{
-    id: string;
-    policyId: string;
-    policyNumber: string;
-    ownerName: string;
-    recipientEmail: string;
-    recipientPhone: string;
-    channel: string;
-    subject: string;
-    body: string;
-    status: string;
-    sentAt: string;
-    daysLeft: number;
-  }>;
+  alerts: Array<{ id: string; policyId: string; policyNumber: string; ownerName: string; recipientEmail: string; recipientPhone: string; channel: string; subject: string; body: string; status: string; sentAt: string; daysLeft: number }>;
 }
 
-export async function dispatch30DayExpiryAlerts(
-  policyIds?: string[],
-  channel: 'EMAIL' | 'WHATSAPP' | 'SMS' = 'EMAIL',
-  customMessage?: string
-): Promise<NotificationAlertResult> {
+export async function dispatch30DayExpiryAlerts(policyIds?: string[], channel: 'EMAIL' | 'WHATSAPP' | 'SMS' = 'EMAIL', customMessage?: string): Promise<NotificationAlertResult> {
   try {
     const res = await fetch(apiUrl('/api/notifications/send-alert'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ policyIds, channel, customMessage })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ policyIds, channel, customMessage })
     });
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (err) {
-    console.warn('Notification API call failed, generating simulated alert dispatch', err);
-  }
+    if (res.ok) return await res.json();
+  } catch (err) { console.warn('Notification API call failed, generating simulated alert dispatch', err); }
 
   const policies = getLocalPolicies();
   const today = new Date();
@@ -367,12 +275,11 @@ export async function dispatch30DayExpiryAlerts(
     if (policyIds && policyIds.length > 0) return policyIds.includes(p.id);
     if (p.policyStatus === 'EXPIRING SOON') return true;
     if (p.endDate) {
-      const diff = Math.ceil((new Date(p.endDate).getTime() - today.getTime()) / (1000 * 3600 * 24));
+      const diff = Math.ceil((new Date(p.endDate).getTime() - today.getTime()) / 86400000);
       return diff >= 0 && diff <= 30;
     }
     return false;
   });
-
   const alerts = targetPolicies.map(p => ({
     id: `notif-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     policyId: p.id,
@@ -383,38 +290,16 @@ export async function dispatch30DayExpiryAlerts(
     channel,
     subject: `URGENT: 30-Day Policy Renewal Notice - ${p.providerCompany} Policy #${p.policyNumber}`,
     body: customMessage || `Dear ${p.ownerName},\nYour policy #${p.policyNumber} with ${p.providerCompany} expires in 30 days. Please arrange renewal payment of ₹${p.premiumAmount || 0}.\nV Shiroya Insurance Portal`,
-    status: 'DELIVERED',
-    sentAt: new Date().toISOString(),
-    daysLeft: p.endDate ? Math.max(0, Math.ceil((new Date(p.endDate).getTime() - today.getTime()) / (1000 * 3600 * 24))) : 30
+    status: 'DELIVERED', sentAt: new Date().toISOString(),
+    daysLeft: p.endDate ? Math.max(0, Math.ceil((new Date(p.endDate).getTime() - today.getTime()) / 86400000)) : 30
   }));
-
-  return {
-    success: true,
-    message: `Dispatched 30-day ${channel} expiry alert notices to ${alerts.length} client(s).`,
-    countSent: alerts.length,
-    alerts
-  };
+  return { success: true, message: `Dispatched 30-day ${channel} expiry alert notices to ${alerts.length} client(s).`, countSent: alerts.length, alerts };
 }
 
 export async function fetchSecurityAuditLogs(): Promise<SecurityAuditLog[]> {
   try {
     const res = await fetch(apiUrl('/api/security/audit'));
-    if (res.ok) {
-      const data = await res.json();
-      return data.logs;
-    }
-  } catch (err) {
-    // fallback
-  }
-
-  return [
-    {
-      id: 'sec-1',
-      timestamp: new Date().toISOString(),
-      action: 'SYSTEM_INITIALIZED',
-      actor: 'VIJAY SHIROYA (CA)',
-      details: 'PolicyAI local security audit store active.',
-      ipAddress: '127.0.0.1'
-    }
-  ];
+    if (res.ok) return (await res.json()).logs;
+  } catch (err) {}
+  return [{ id: 'sec-1', timestamp: new Date().toISOString(), action: 'SYSTEM_INITIALIZED', actor: 'VIJAY SHIROYA (CA)', details: 'PolicyAI local security audit store active.', ipAddress: '127.0.0.1' }];
 }
