@@ -16,9 +16,12 @@ export {
   updateFirestoreProfile
 };
 
+// Prefer the same origin in the browser. This prevents the local PDF analyzer from
+// accidentally calling localhost:3000 when the app/server is actually running on
+// another port such as 3001, and it also keeps deployed frontend/API routing aligned.
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? 'http://localhost:3000' : 'https://v-shiroya-api.onrender.com')
+  (typeof window !== 'undefined' ? window.location.origin : (import.meta.env.DEV ? 'http://localhost:3000' : 'https://v-shiroya-api.onrender.com'))
 ).replace(/\/$/, '');
 
 function apiUrl(path: string): string {
@@ -110,21 +113,33 @@ export async function analyzePolicyDocument(
   mimeType: string,
   instruction: string
 ): Promise<ExtractionResult> {
+  if (!fileData) throw new Error('Please select a PDF before starting analysis.');
+
   try {
     const response = await fetch(apiUrl('/api/analyze-policy'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileData, fileName, mimeType, instruction }),
+      // Avoid browser caching while keeping a single request to the analyzer.
+      cache: 'no-store'
     });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || errData.details || `AI Policy Analysis failed (Server HTTP ${response.status})`);
+
+    const rawText = await response.text();
+    let data: any = {};
+    try { data = rawText ? JSON.parse(rawText) : {}; } catch {
+      data = {};
     }
-    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.details || data.error || `AI Policy Analysis failed (Server HTTP ${response.status})`);
+    }
     if (!data.extraction) throw new Error('AI analysis server returned an invalid response structure.');
     return data.extraction;
   } catch (err: any) {
     console.error('Error in analyzePolicyDocument:', err);
+    if (err?.name === 'TypeError' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('The AI analysis server cannot be reached. Check that the local server is running.');
+    }
     throw new Error(err.message || 'Unable to connect to AI analysis backend server.');
   }
 }
