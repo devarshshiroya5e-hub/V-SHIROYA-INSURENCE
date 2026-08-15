@@ -16,12 +16,16 @@ export {
   updateFirestoreProfile
 };
 
-// Prefer the same origin in the browser. This prevents the local PDF analyzer from
-// accidentally calling localhost:3000 when the app/server is actually running on
-// another port such as 3001, and it also keeps deployed frontend/API routing aligned.
+// In development, use the same local origin (for example localhost:3001).
+// In production, the Firebase frontend and Express/Gemini API are deployed
+// separately, so API requests must go to the Render backend instead of asking
+// Firebase Hosting for /api/* (which returns index.html and causes JSON parse
+// errors such as "Unexpected token '<'", and also breaks PDF analysis).
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ||
-  (typeof window !== 'undefined' ? window.location.origin : (import.meta.env.DEV ? 'http://localhost:3000' : 'https://v-shiroya-api.onrender.com'))
+  (import.meta.env.PROD
+    ? 'https://v-shiroya-api.onrender.com'
+    : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'))
 ).replace(/\/$/, '');
 
 function apiUrl(path: string): string {
@@ -120,7 +124,6 @@ export async function analyzePolicyDocument(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileData, fileName, mimeType, instruction }),
-      // Avoid browser caching while keeping a single request to the analyzer.
       cache: 'no-store'
     });
 
@@ -254,9 +257,19 @@ export async function deletePolicyRecord(id: string): Promise<boolean> {
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   try {
-    const res = await fetch(apiUrl('/api/stats'));
-    if (res.ok) return await res.json();
-  } catch (err) { console.warn('Stats API failed, computing locally', err); }
+    const res = await fetch(apiUrl('/api/stats'), { cache: 'no-store' });
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.toLowerCase().includes('application/json')) {
+      return await res.json();
+    }
+    // Firebase Hosting returns HTML for unknown /api/* routes. Do not try to parse
+    // that HTML as JSON; use the local/Firestore-backed data below instead.
+    if (!res.ok) console.warn(`Stats API returned HTTP ${res.status}`);
+    else console.warn('Stats API returned a non-JSON response; computing locally');
+  } catch (err) {
+    console.warn('Stats API failed, computing locally', err);
+  }
+
   const policies = getLocalPolicies();
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   return {
