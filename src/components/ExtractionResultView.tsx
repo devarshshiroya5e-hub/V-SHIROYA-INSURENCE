@@ -29,6 +29,27 @@ interface Props {
 
 const isEmpty = (value: unknown) => value === null || value === undefined || value === '';
 
+// Gemini may return confidence either as a fraction (0.98 = 98%) or as a percentage (98 = 98%).
+// Normalize only the presentation/storage of confidence; this does NOT alter PDF extraction or AI reasoning.
+const normalizeConfidenceResult = (result: ExtractionResult): ExtractionResult => {
+  const raw = Number(result.confidence);
+  if (!Number.isFinite(raw)) return result;
+
+  const percentage = raw >= 0 && raw <= 1 ? raw * 100 : raw;
+  const normalized = Math.max(0, Math.min(100, percentage));
+
+  return {
+    ...result,
+    confidence: Number(normalized.toFixed(2))
+  };
+};
+
+const confidenceLevel = (confidence: number): 'high' | 'medium' | 'low' => {
+  if (confidence >= 85) return 'high';
+  if (confidence >= 65) return 'medium';
+  return 'low';
+};
+
 export const ExtractionResultView: React.FC<Props> = ({
   extraction,
   fileName,
@@ -39,21 +60,30 @@ export const ExtractionResultView: React.FC<Props> = ({
   isSaving,
   onUploadMore
 }) => {
-  const initialBatch = batchItems.length ? batchItems : [{ id: 'single', fileName, fileType: 'application/pdf', result: extraction }];
+  const normalizedInitial = normalizeConfidenceResult(extraction);
+  const initialBatch = batchItems.length
+    ? batchItems.map(item => ({ ...item, result: normalizeConfidenceResult(item.result) }))
+    : [{ id: 'single', fileName, fileType: 'application/pdf', result: normalizedInitial }];
+
   const [items, setItems] = useState<BatchExtractionItem[]>(initialBatch);
   const [activeIndex, setActiveIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState<ExtractionResult>(initialBatch[0].result);
 
   useEffect(() => {
-    setItems(batchItems.length ? batchItems : [{ id: 'single', fileName, fileType: 'application/pdf', result: extraction }]);
+    const nextItems = batchItems.length
+      ? batchItems.map(item => ({ ...item, result: normalizeConfidenceResult(item.result) }))
+      : [{ id: 'single', fileName, fileType: 'application/pdf', result: normalizedInitial }];
+
+    setItems(nextItems);
     setActiveIndex(0);
-    setFormData((batchItems.length ? batchItems : [{ id: 'single', fileName, fileType: 'application/pdf', result: extraction }])[0].result);
+    setFormData(nextItems[0].result);
   }, [batchItems, extraction, fileName]);
 
   const updateForm = (next: ExtractionResult) => {
-    setFormData(next);
-    setItems(prev => prev.map((item, index) => index === activeIndex ? { ...item, result: next } : item));
+    const normalized = normalizeConfidenceResult(next);
+    setFormData(normalized);
+    setItems(prev => prev.map((item, index) => index === activeIndex ? { ...item, result: normalized } : item));
   };
 
   const handleFieldChange = (field: keyof ExtractionResult, value: any) => {
@@ -62,7 +92,7 @@ export const ExtractionResultView: React.FC<Props> = ({
 
   const switchItem = (index: number) => {
     setActiveIndex(index);
-    setFormData(items[index].result);
+    setFormData(normalizeConfidenceResult(items[index].result));
     setEditing(false);
   };
 
@@ -71,7 +101,8 @@ export const ExtractionResultView: React.FC<Props> = ({
       ...item.result,
       originalFileName: item.fileName,
       fileType: item.fileType,
-      extractedText: item.result.extractedText || ''
+      extractedText: item.result.extractedText || '',
+      aiConfidence: normalizeConfidenceResult(item.result).confidence
     }));
     if (onSaveBatch) onSaveBatch(records);
     else onSave(formData);
@@ -116,6 +147,9 @@ export const ExtractionResultView: React.FC<Props> = ({
 
   const fieldEvidence = formData.fieldEvidence || [];
   const multi = items.length > 1;
+  const overallConfidence = normalizeConfidenceResult(formData).confidence || 0;
+  const overallLevel = confidenceLevel(overallConfidence);
+  const overallLabel = overallLevel === 'high' ? 'High Confidence' : overallLevel === 'medium' ? 'Medium Confidence' : 'Low Confidence';
 
   return (
     <div className="mx-auto w-full max-w-6xl px-3 py-5 sm:px-5">
@@ -140,7 +174,7 @@ export const ExtractionResultView: React.FC<Props> = ({
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             userId: 'acc-1',
-            aiConfidence: item.result.confidence,
+            aiConfidence: normalizeConfidenceResult(item.result).confidence,
             additionalDetails: item.result.additionalDetails || [],
             missingFields: item.result.missingFields || [],
             uncertainFields: item.result.uncertainFields || []
@@ -176,9 +210,14 @@ export const ExtractionResultView: React.FC<Props> = ({
             <p className="mt-1 text-sm text-slate-300">Policy #{formData.policyNumber || 'Not available'} · {formData.providerCompany || 'Insurance Provider'}</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-right">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Extraction confidence</div>
-            <div className="text-3xl font-black text-emerald-300">{formData.confidence || 0}%</div>
-            <div className="text-[10px] text-slate-400">2-pass PDF extraction + verification</div>
+            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">AI Extraction Confidence</div>
+            <div className="flex items-center justify-end gap-2">
+              <div className="text-3xl font-black text-emerald-300">{overallConfidence}%</div>
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-bold text-emerald-300">
+                <CheckCircle2 className="h-3 w-3" /> {overallLabel}
+              </span>
+            </div>
+            <div className="text-[10px] text-slate-400">Based on the AI extraction confidence value; PDF reasoning unchanged</div>
           </div>
         </div>
         <div className="mt-5 flex flex-wrap gap-2 border-t border-white/10 pt-4 text-[11px]">
