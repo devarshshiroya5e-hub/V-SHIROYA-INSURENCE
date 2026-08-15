@@ -18,3 +18,19 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: Smoke test backend health and JSON routes
+        shell: bash
+        run: |
+          PORT=3000 INTERNAL_API_PORT=3001 NODE_ENV=production node dist/proxy.cjs > server-smoke.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health >/tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+          test -s /tmp/health.json
+          grep -q '"status"' /tmp/health.json
+          curl -fsS http://127.0.0.1:3000/api/stats >/tmp/stats.json
+          grep -q '"totalPolicies"' /tmp/stats.json
