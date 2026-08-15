@@ -374,7 +374,7 @@ Use the attached PDF itself as the evidence. Do not answer from the filename.`;
       parts: [
         {
           inlineData: { mimeType, data: pdf },
-          mediaResolution: { level: MediaResolution.MEDIA_RESOLUTION_MEDIUM }
+          mediaResolution: { level: "MEDIA_RESOLUTION_MEDIUM" as any }
         },
         { text: prompt }
       ]
@@ -397,7 +397,7 @@ async function verifyOnce(ai: GoogleGenAI, pdf: string, mimeType: string, candid
       parts: [
         {
           inlineData: { mimeType, data: pdf },
-          mediaResolution: { level: MediaResolution.MEDIA_RESOLUTION_MEDIUM }
+          mediaResolution: { level: "MEDIA_RESOLUTION_MEDIUM" as any }
         },
         {
           text: `You are the final insurance-document verification auditor. Compare the candidate JSON below against the ATTACHED PDF page by page.
