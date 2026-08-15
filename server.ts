@@ -15,18 +15,12 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes("generativelanguage.googleapis.com") && init?.body && typeof init.body === "string") {
     try {
       const body = JSON.parse(init.body);
-      const stripLegacySampling = (value: any) => {
-        if (!value || typeof value !== "object") return value;
-        if (value.generationConfig && typeof value.generationConfig === "object") {
-          delete value.generationConfig.temperature;
-          delete value.generationConfig.topP;
-          delete value.generationConfig.topK;
-        }
-        return value;
-      };
-
-      const cleaned = stripLegacySampling(body);
-      init = { ...init, body: JSON.stringify(cleaned) };
+      if (body?.generationConfig && typeof body.generationConfig === "object") {
+        delete body.generationConfig.temperature;
+        delete body.generationConfig.topP;
+        delete body.generationConfig.topK;
+      }
+      init = { ...init, body: JSON.stringify(body) };
     } catch {
       // Leave non-JSON Gemini requests untouched.
     }
@@ -35,5 +29,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return originalFetch(input, init);
 };
 
-// Load the actual application only after the compatibility layer is installed.
-await import("./server-v2");
+// Do not use top-level await because the production build bundles server.ts as CommonJS.
+(async () => {
+  await import("./server-v2");
+})();
