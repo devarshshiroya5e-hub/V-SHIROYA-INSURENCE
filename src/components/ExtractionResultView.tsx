@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Download,
   Edit3,
   FileSpreadsheet,
   FileText,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 import { ExtractionResult, PolicyRecord, BatchExtractionItem } from '../types';
 import { downloadSinglePolicyExcel, downloadPoliciesBulkExcel } from '../lib/excelUtils';
+import { storePdfFile } from '../lib/pdfStorage';
 
 interface Props {
   extraction: ExtractionResult;
@@ -29,19 +31,12 @@ interface Props {
 
 const isEmpty = (value: unknown) => value === null || value === undefined || value === '';
 
-// Gemini may return confidence either as a fraction (0.98 = 98%) or as a percentage (98 = 98%).
-// Normalize only the presentation/storage of confidence; this does NOT alter PDF extraction or AI reasoning.
 const normalizeConfidenceResult = (result: ExtractionResult): ExtractionResult => {
   const raw = Number(result.confidence);
   if (!Number.isFinite(raw)) return result;
-
   const percentage = raw >= 0 && raw <= 1 ? raw * 100 : raw;
   const normalized = Math.max(0, Math.min(100, percentage));
-
-  return {
-    ...result,
-    confidence: Number(normalized.toFixed(2))
-  };
+  return { ...result, confidence: Number(normalized.toFixed(2)) };
 };
 
 const confidenceLevel = (confidence: number): 'high' | 'medium' | 'low' => {
@@ -74,7 +69,6 @@ export const ExtractionResultView: React.FC<Props> = ({
     const nextItems = batchItems.length
       ? batchItems.map(item => ({ ...item, result: normalizeConfidenceResult(item.result) }))
       : [{ id: 'single', fileName, fileType: 'application/pdf', result: normalizedInitial }];
-
     setItems(nextItems);
     setActiveIndex(0);
     setFormData(nextItems[0].result);
@@ -96,7 +90,19 @@ export const ExtractionResultView: React.FC<Props> = ({
     setEditing(false);
   };
 
-  const saveBatch = () => {
+  const saveBatch = async () => {
+    // Keep the exact uploaded source document in IndexedDB before the policy record is saved.
+    // This avoids generating a different PDF summary when the user later clicks Download PDF.
+    for (const item of items) {
+      const policyNumber = item.result.policyNumber?.trim();
+      if (policyNumber && item.fileBase64) {
+        await storePdfFile(policyNumber, item.fileBase64);
+      }
+      if (item.fileBase64) {
+        await storePdfFile(`upload:${item.fileName}`, item.fileBase64);
+      }
+    }
+
     const records = items.map(item => ({
       ...item.result,
       originalFileName: item.fileName,
@@ -109,11 +115,17 @@ export const ExtractionResultView: React.FC<Props> = ({
   };
 
   const renderConfidence = (field: string) => {
-    const confidence = formData.fieldConfidenceMap?.[field] || 'medium';
-    if (confidence === 'high') {
+    // Field confidence is still taken from the AI result. When the verified overall
+    // confidence is high, show the same high-confidence presentation rather than
+    // displaying a misleading default "Medium" badge.
+    const overallConfidence = normalizeConfidenceResult(formData).confidence || 0;
+    const confidence = formData.fieldConfidenceMap?.[field];
+    const effectiveConfidence = overallConfidence >= 85 && !confidence ? 'high' : (confidence || 'medium');
+
+    if (effectiveConfidence === 'high') {
       return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md"><CheckCircle2 className="w-3 h-3" />High</span>;
     }
-    if (confidence === 'low') {
+    if (effectiveConfidence === 'low') {
       return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md"><AlertTriangle className="w-3 h-3" />Verify</span>;
     }
     return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md"><AlertTriangle className="w-3 h-3" />Medium</span>;
@@ -151,6 +163,22 @@ export const ExtractionResultView: React.FC<Props> = ({
   const overallLevel = confidenceLevel(overallConfidence);
   const overallLabel = overallLevel === 'high' ? 'High Confidence' : overallLevel === 'medium' ? 'Medium Confidence' : 'Low Confidence';
 
+  const downloadCurrentOriginal = async () => {
+    const current = items[activeIndex];
+    if (!current?.fileBase64) {
+      window.alert('The original uploaded document is not available in this analysis session.');
+      return;
+    }
+
+    const safeName = (current.fileName || 'Uploaded_Policy_Document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const link = document.createElement('a');
+    link.href = current.fileBase64;
+    link.download = safeName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="mx-auto w-full max-w-6xl px-3 py-5 sm:px-5">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -158,6 +186,9 @@ export const ExtractionResultView: React.FC<Props> = ({
           <ArrowLeft className="h-4 w-4" /> Upload / Analyze Another PDF
         </button>
         <div className="flex flex-wrap gap-2">
+          <button onClick={downloadCurrentOriginal} className="flex items-center gap-2 rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-xs font-bold text-indigo-800">
+            <Download className="h-4 w-4" /> Download Original PDF
+          </button>
           <button onClick={() => downloadSinglePolicyExcel(formData)} className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
             <FileSpreadsheet className="h-4 w-4" /> Export Excel
           </button>
@@ -203,9 +234,7 @@ export const ExtractionResultView: React.FC<Props> = ({
       <div className="mb-6 rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">
-              <CheckCircle2 className="h-4 w-4" /> PDF VERIFIED EXTRACTION
-            </div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300"><CheckCircle2 className="h-4 w-4" /> PDF VERIFIED EXTRACTION</div>
             <h1 className="text-2xl font-black sm:text-3xl">{formData.ownerName || 'Unnamed Policy Owner'}</h1>
             <p className="mt-1 text-sm text-slate-300">Policy #{formData.policyNumber || 'Not available'} · {formData.providerCompany || 'Insurance Provider'}</p>
           </div>
@@ -213,9 +242,7 @@ export const ExtractionResultView: React.FC<Props> = ({
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">AI Extraction Confidence</div>
             <div className="flex items-center justify-end gap-2">
               <div className="text-3xl font-black text-emerald-300">{overallConfidence}%</div>
-              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-bold text-emerald-300">
-                <CheckCircle2 className="h-3 w-3" /> {overallLabel}
-              </span>
+              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-400/40 bg-emerald-400/15 px-2 py-1 text-[10px] font-bold text-emerald-200"><CheckCircle2 className="h-3 w-3" /> {overallLabel}</span>
             </div>
             <div className="text-[10px] text-slate-400">Based on the AI extraction confidence value; PDF reasoning unchanged</div>
           </div>
@@ -266,9 +293,7 @@ export const ExtractionResultView: React.FC<Props> = ({
             <div className="lg:col-span-2">{renderField('Residential / Mailing Address', 'address', formData.address)}</div>
           </div>
           {formData.ageSource === 'calculated_from_date_of_birth_at_policy_start' && (
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
-              Age was not printed in the PDF, so it was calculated from the extracted DOB using the policy commencement date. If the PDF has a separate member-age table, verify that value.
-            </div>
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">Age was not printed in the PDF, so it was calculated from the extracted DOB using the policy commencement date. If the PDF has a separate member-age table, verify that value.</div>
           )}
         </section>
 
