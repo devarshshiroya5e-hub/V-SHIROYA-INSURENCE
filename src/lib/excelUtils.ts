@@ -44,7 +44,7 @@ export function downloadSinglePolicyExcel(policy: Partial<PolicyRecord>, customF
     ['Policy Owner / Proposer', policy.ownerName || 'N/A'],
     ['Insured Person Name', policy.insuredPerson || policy.ownerName || 'N/A'],
     ['Date of Birth', policy.dateOfBirth || 'N/A'],
-    ['Age', policy.age ?? 'N/A'],
+    ['Age', String(policy.age ?? 'N/A')],
     ['Age Source', policy.ageSource || 'N/A'],
     ['Nominee Name', policy.nominee || 'N/A'],
     ['Nominee Relationship', policy.nomineeRelationship || 'N/A'],
@@ -92,43 +92,31 @@ export function downloadSinglePolicyExcel(policy: Partial<PolicyRecord>, customF
   URL.revokeObjectURL(url);
 }
 
-export function downloadPoliciesBulkExcel(policies: PolicyRecord[], customFilename?: string): void {
-  const filename = customFilename || `V_Shiroya_Insurance_Policies_Export_${new Date().toISOString().slice(0, 10)}.csv`;
-  const headers = [
-    'Policy ID', 'Policy Number', 'Owner / Proposer Name', 'Insurance Provider', 'Policy Type / Plan', 'Category',
-    'Policy Status', 'Premium Amount (₹)', 'Sum Assured (₹)', 'Payment Mode', 'Start Date', 'End Date',
-    'Date of Birth', 'Age', 'Age Source', 'Insured Person', 'Nominee Name', 'Nominee Relation', 'Phone Number',
-    'Email Address', 'Agent Name', 'Branch Name', 'Created Date'
-  ];
+export function downloadPoliciesBulkExcel(policies: PolicyRecord[], customFilename = 'V_Shiroya_Policy_Bulk_Audit.csv'): void {
+  const headers = ['Owner Name', 'Policy Number', 'Provider', 'Policy Type', 'Category', 'Status', 'Start Date', 'End Date', 'Premium', 'Sum Assured', 'Phone', 'Email', 'Age', 'Original File'];
+  const rows = policies.map(policy => [
+    policy.ownerName,
+    policy.policyNumber,
+    policy.providerCompany,
+    policy.policyType,
+    policy.category,
+    policy.policyStatus,
+    policy.startDate || 'N/A',
+    policy.endDate || 'N/A',
+    formatCurrency(policy.premiumAmount),
+    formatCurrency(policy.sumAssured),
+    policy.phoneNumber || 'N/A',
+    policy.email || 'N/A',
+    String(policy.age ?? 'N/A'),
+    policy.originalFileName || 'policy_document.pdf'
+  ].map(escapeCsvCell));
 
-  const dataRows = policies.map(p => [
-    p.id, p.policyNumber, p.ownerName, p.providerCompany, p.policyType, p.category || 'General', p.policyStatus,
-    p.premiumAmount ?? '', p.sumAssured ?? '', p.paymentMode || '', p.startDate || '', p.endDate || '',
-    p.dateOfBirth || '', p.age ?? '', p.ageSource || '', p.insuredPerson || '', p.nominee || '', p.nomineeRelationship || '',
-    p.phoneNumber || '', p.email || '', p.agentName || '', p.branchName || '', p.createdAt || ''
-  ]);
-
-  const totalPremium = policies.reduce((sum, p) => sum + (Number(p.premiumAmount) || 0), 0);
-  const totalSumAssured = policies.reduce((sum, p) => sum + (Number(p.sumAssured) || 0), 0);
-  const summaryRow = ['TOTALS', `Total Count: ${policies.length}`, '', '', '', '', '', totalPremium, totalSumAssured, '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
-
-  const allRows = [
-    ['V SHIROYA INSURANCE PORTAL - POLICIES MASTER EXCEL SHEET'],
-    [`Export Date: ${new Date().toLocaleString()}`, `Total Policy Records: ${policies.length}`],
-    [''],
-    headers,
-    ...dataRows,
-    [''],
-    summaryRow
-  ];
-
-  const csvContent = '\uFEFF' + allRows.map(r => r.map(escapeCsvCell).join(',')).join('\n');
+  const csvContent = '\uFEFF' + [headers.map(escapeCsvCell), ...rows].map(r => r.join(',')).join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  link.style.visibility = 'hidden';
+  link.href = url;
+  link.download = customFilename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
