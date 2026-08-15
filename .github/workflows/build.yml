@@ -34,7 +34,7 @@ jobs:
           cat server-smoke.log
           cat /tmp/health.json 2>/dev/null || true
           test -s /tmp/health.json
-          grep -q '"status"' /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
           curl -fsS http://127.0.0.1:3000/api/stats >/tmp/stats.json
           cat /tmp/stats.json
           grep -q '"totalPolicies"' /tmp/stats.json
