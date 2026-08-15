@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,38 +16,5 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Fix Gemini media-resolution SDK typing
-        if: github.event_name == 'push'
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('server-v2.ts')
-          text = path.read_text(encoding='utf-8')
-          old = 'mediaResolution: { level: MediaResolution.MEDIA_RESOLUTION_MEDIUM }'
-          new = 'mediaResolution: { level: "MEDIA_RESOLUTION_MEDIUM" as any }'
-          count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'Expected 2 media-resolution sites, found {count}')
-          path.write_text(text.replace(old, new), encoding='utf-8')
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- server-v2.ts; then
-            git add server-v2.ts
-            git commit -m "Fix Gemini media resolution TypeScript compatibility"
-            git push
-          fi
-      - name: Typecheck
-        run: |
-          set +e
-          npm run lint > lint.log 2>&1
-          status=$?
-          cat lint.log
-          exit $status
-      - name: Upload typecheck log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-log
-          path: lint.log
+      - run: npm run lint
       - run: npm run build
